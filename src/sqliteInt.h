@@ -63,6 +63,8 @@
 */
 #include "vxworks.h"
 
+#include "nuttx.h"
+
 /*
 ** These #defines should enable >2GB file support on POSIX if the
 ** underlying operating system supports it.  If the OS lacks

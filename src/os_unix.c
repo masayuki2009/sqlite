@@ -343,6 +343,11 @@ static pid_t randomnessPid = 0;
 #define F2FS_FEATURE_ATOMIC_WRITE 0x0004
 #endif /* __linux__ */
 
+#ifdef NUTTX
+#undef HAVE_FCHOWN
+#undef HAVE_READLINK
+#undef HAVE_LSTAT
+#endif
 
 /*
 ** Different Unix systems declare open() in different ways.  Same use
@@ -442,7 +447,11 @@ static struct unix_syscall {
 #define osPwrite64  ((ssize_t(*)(int,const void*,size_t,off64_t))\
                     aSyscall[13].pCurrent)
 
+#if !defined(NUTTX)
   { "fchmod",       (sqlite3_syscall_ptr)fchmod,          0  },
+#else
+  { "fchmod",       (sqlite3_syscall_ptr)0,          0  },
+#endif
 #define osFchmod    ((int(*)(int,mode_t))aSyscall[14].pCurrent)
 
 #if defined(HAVE_POSIX_FALLOCATE) && HAVE_POSIX_FALLOCATE
@@ -1345,6 +1354,9 @@ static int findInodeInfo(
   unixFile *pFile,               /* Unix file with file desc used in the key */
   unixInodeInfo **ppInode        /* Return the unixInodeInfo object here */
 ){
+#ifdef NUTTX
+  return SQLITE_OK;
+#else
   int rc;                        /* System call return code */
   int fd;                        /* The file descriptor for pFile */
   struct unixFileId fileId;      /* Lookup key for the unixInodeInfo */
@@ -1426,12 +1438,16 @@ static int findInodeInfo(
   }
   *ppInode = pInode;
   return SQLITE_OK;
+#endif
 }
 
 /*
 ** Return TRUE if pFile has been renamed or unlinked since it was first opened.
 */
 static int fileHasMoved(unixFile *pFile){
+#ifdef NUTTX
+  return FALSE;
+#else
 #if OS_VXWORKS
   return pFile->pInode!=0 && pFile->pId!=pFile->pInode->fileId.pId;
 #else
@@ -1439,6 +1455,7 @@ static int fileHasMoved(unixFile *pFile){
   return pFile->pInode!=0 &&
       (osStat(pFile->zPath, &buf)!=0 
          || (u64)buf.st_ino!=pFile->pInode->fileId.ino);
+#endif
 #endif
 }
 
@@ -1453,6 +1470,7 @@ static int fileHasMoved(unixFile *pFile){
 ** Issue sqlite3_log(SQLITE_WARNING,...) messages if anything is not right.
 */
 static void verifyDbFile(unixFile *pFile){
+#ifndef NUTTX
   struct stat buf;
   int rc;
 
@@ -1476,6 +1494,7 @@ static void verifyDbFile(unixFile *pFile){
     sqlite3_log(SQLITE_WARNING, "file renamed while open: %s", pFile->zPath);
     return;
   }
+#endif
 }
 
 
@@ -2268,7 +2287,9 @@ static int dotlockLock(sqlite3_file *id, int eFileLock) {
 #ifdef HAVE_UTIME
     utime(zLockFile, NULL);
 #else
+#ifndef NUTTX
     utimes(zLockFile, NULL);
+#endif
 #endif
     return SQLITE_OK;
   }
@@ -5737,7 +5758,7 @@ static UnixUnusedFd *findReusableFd(const char *zPath, int flags){
   ** but because no way to test it is currently available. It is better 
   ** not to risk breaking vxworks support for the sake of such an obscure 
   ** feature.  */
-#if !OS_VXWORKS
+#if !defined(OS_VXWORKS) && !defined(NUTTX)
   struct stat sStat;                   /* Results of stat() call */
 
   unixEnterMutex();
@@ -5788,8 +5809,10 @@ static int getFileMode(
   int rc = SQLITE_OK;
   if( 0==osStat(zFile, &sStat) ){
     *pMode = sStat.st_mode & 0777;
+#ifndef NUTTX
     *pUid = sStat.st_uid;
     *pGid = sStat.st_gid;
+#endif
   }else{
     rc = SQLITE_IOERR_FSTAT;
   }
@@ -7811,6 +7834,9 @@ int sqlite3_os_init(void){
   ** array cannot be const.
   */
   static sqlite3_vfs aVfs[] = {
+#ifdef NUTTX
+    UNIXVFS("unix",          nolockIoFinder ),
+#endif
 #if SQLITE_ENABLE_LOCKING_STYLE && defined(__APPLE__)
     UNIXVFS("unix",          autolockIoFinder ),
 #elif OS_VXWORKS
